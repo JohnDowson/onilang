@@ -6,4 +6,6 @@ pub enum Error {
     Parser,
     #[error("Compiler error")]
     Compiler,
+    #[error("Eval error")]
+    Eval,
 }

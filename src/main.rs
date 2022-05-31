@@ -1,5 +1,6 @@
 use chumsky::Span as _;
 use clap::Parser;
+use lasso::Rodeo;
 use logos::Logos;
 use onilang::{compiler::Compiler, error::Error, lexer::Token, parser::parse, Span};
 use std::{fs::File, io::Read, path::PathBuf};
@@ -41,7 +42,9 @@ fn main() -> Result<(), Error> {
         println!("{:#?}", &ast);
     }
 
-    let (code, consts) = Compiler::compile(ast)?;
-    println!("{:#?}", &code);
+    let mut interner = Rodeo::new();
+    let mut vm = Compiler::compile(ast, &mut interner)?;
+    vm.eval()?;
+
     Ok(())
 }

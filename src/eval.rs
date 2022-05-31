@@ -1,28 +1,41 @@
-use crate::error::Error;
-use std::collections::HashMap;
+use lasso::{Rodeo, Spur};
 
-pub struct Vm<'i, 'c> {
-    env: HashMap<&'i str, Slot>,
-    stack: Box<[Value; 256]>,
-    sp: usize,
-    code: &'c [Opcode<'i>],
+use crate::{compiler::FuncProto, error::Error};
+use std::{collections::HashMap, rc::Rc};
+
+pub struct Vm<'i> {
+    env: HashMap<Spur, Slot>,
+    interner: &'i mut Rodeo,
+    stack: Vec<Value>,
+    code: Rc<[Opcode]>,
     ip: usize,
-    consts: Vec<Value>,
+    consts: Vec<ConstValue>,
 }
 
-impl<'i, 'c> Vm<'i, 'c> {
-    fn new(code: &'c [Opcode<'i>]) -> Self {
+impl<'i> Vm<'i> {
+    pub fn new(code: Rc<[Opcode]>, consts: Vec<ConstValue>, interner: &'i mut Rodeo) -> Self {
+        let mut env = HashMap::default();
+        env.insert(
+            interner.get_or_intern_static("print"),
+            Slot {
+                flags: Flags::ASSIGNED,
+                value: Value::Func(RuntimeFunc::Native(|vm| {
+                    let arg = vm.stack.pop().unwrap();
+                    println!("{:?}", arg);
+                })),
+            },
+        );
         Self {
-            env: Default::default(),
-            stack: box [const { Value::Undefined }; 256],
-            sp: 0,
+            env,
+            interner,
+            stack: Vec::new(),
             code,
             ip: 0,
-            consts: Default::default(),
+            consts,
         }
     }
 
-    fn eval(&mut self) -> Result<(), Error> {
+    pub fn eval(&mut self) -> Result<(), Error> {
         loop {
             let op = &self.code[self.ip];
             println!("{}|\t{:?}", self.ip, op);
@@ -32,7 +45,23 @@ impl<'i, 'c> Vm<'i, 'c> {
                 Opcode::Defslot(_, _) => todo!(),
                 Opcode::Assign(_) => todo!(),
                 Opcode::Read(_) => todo!(),
-                &Opcode::Const(c) => self.stack[self.sp] = self.consts[c],
+                Opcode::Call(name) => match self.env.get(name) {
+                    Some(Slot {
+                        flags: _,
+                        value: Value::Func(RuntimeFunc::Virtual(func)),
+                    }) => {
+                        self.code = Rc::clone(&func.code);
+                    }
+                    Some(Slot {
+                        flags: _,
+                        value: Value::Func(RuntimeFunc::Native(func)),
+                    }) => {
+                        func(self);
+                    }
+                    Some(_) => return Err(Error::Eval),
+                    None => return Err(Error::Eval),
+                },
+                &Opcode::Const(c) => self.stack.push(self.consts[c].into()),
             }
 
             if self.ip == self.code.len() {
@@ -56,19 +85,56 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Debug)]
 pub enum Value {
     Int(i64),
     Uint(u64),
     Float(f64),
-    String(()),
+    String(String),
+    Str(Spur),
+    Func(RuntimeFunc),
     Undefined,
 }
 
-#[derive(Debug)]
-pub enum Opcode<'i> {
-    Defslot(&'i str, Flags),
-    Assign(&'i str),
-    Read(&'i str),
+#[derive(Clone)]
+pub enum RuntimeFunc {
+    Native(fn(&mut Vm)),
+    Virtual(FuncProto),
+}
+
+impl std::fmt::Debug for RuntimeFunc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Native(_) => f.debug_tuple("Native").finish(),
+            Self::Virtual(arg0) => f.debug_tuple("Virtual").field(arg0).finish(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ConstValue {
+    Int(i64),
+    Uint(u64),
+    Float(f64),
+    Str(Spur),
+}
+
+impl Into<Value> for ConstValue {
+    fn into(self) -> Value {
+        match self {
+            ConstValue::Int(i) => Value::Int(i),
+            ConstValue::Uint(u) => Value::Uint(u),
+            ConstValue::Float(f) => Value::Float(f),
+            ConstValue::Str(s) => Value::Str(s),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Opcode {
+    Defslot(Spur, Flags),
+    Assign(Spur),
+    Call(Spur),
+    Read(Spur),
     Const(usize),
 }
