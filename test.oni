@@ -1,0 +1,8 @@
+defn main() do
+  a := new Object
+  a.b := new("Hello") String
+  a.c $= new("Hello") String
+  a.b = new("Foo") String
+  a.c = new("Foo") String // => Error: reassignment to immutable place
+  print(a.b) // => Foo
+end

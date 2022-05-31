@@ -1,0 +1,3 @@
+defn main() do
+  print(69)
+end
