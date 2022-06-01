@@ -24,6 +24,8 @@ pub enum Token<'s> {
     KwLoop,
     #[token("break")]
     KwBreak,
+    #[token("if")]
+    KwIf,
 
     #[token("+")]
     Plus,

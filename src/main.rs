@@ -26,7 +26,7 @@ fn main() -> Result<(), Error> {
         .map(|(t, s)| (t, Span::new(&args.file, s)))
         .collect::<Vec<_>>();
     if args.dump_tokens {
-        println!("{:#?}", &tokens);
+        println!("{:?}", &tokens);
     }
 
     let ast = match parse(tokens) {

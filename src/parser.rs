@@ -8,6 +8,7 @@ pub enum Ast<'s, 'p> {
     Defn(Box<Defn<'s, 'p>>),
 
     Assignment(Box<Assignment<'s, 'p>>),
+    BinOp(Box<BinOp<'s, 'p>>),
 
     String(&'s str),
     Int(i64),
@@ -35,6 +36,13 @@ pub struct Assignment<'s, 'p> {
     pub place: SpannedAst<'s, 'p>,
     pub assign: Spanned<'p, Token<'s>>,
     pub expr: SpannedAst<'s, 'p>,
+}
+
+#[derive(Debug)]
+pub struct BinOp<'s, 'p> {
+    pub lhs: SpannedAst<'s, 'p>,
+    pub op: Spanned<'p, Token<'s>>,
+    pub rhs: SpannedAst<'s, 'p>,
 }
 
 #[derive(Debug)]
@@ -96,6 +104,13 @@ fn kw_loop<'s, 'p>(
     }
 }
 
+fn equals<'s, 'p>(
+) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> {
+    select! {
+        token @ Token::Equals, span =>  Spanned { span, inner: token }
+    }
+}
+
 fn place<'s, 'p>() -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>>
 {
     ident()
@@ -115,6 +130,15 @@ fn expression<'s: 'r, 'p: 'r, 'r>(
             .map_with_span(|((_lparen, args), _rparen), span| Spanned {
                 span,
                 inner: Ast::Paramlist(args),
+            });
+
+        let bin_op = expression
+            .clone()
+            .then(choice((equals(),)))
+            .then(expression.clone())
+            .map_with_span(|((lhs, op), rhs), span| Spanned {
+                span,
+                inner: Ast::BinOp(box BinOp { lhs, op, rhs }),
             });
 
         let loop_ = kw_loop()
@@ -156,7 +180,7 @@ fn expression<'s: 'r, 'p: 'r, 'r>(
 
         let literal = choice((string, number));
 
-        choice((literal, new, call, place(), loop_))
+        choice((literal, new, call, place(), loop_, bin_op))
     })
 }
 

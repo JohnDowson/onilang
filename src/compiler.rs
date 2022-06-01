@@ -171,6 +171,7 @@ impl<'i> Compiler<'i> {
                 Ok(())
             }
             Ast::Assignment(_) => Err(Error::compiler(concat!(file!(), ":", line!()))),
+            Ast::BinOp(_) => todo!(),
             Ast::String(s) => {
                 let s = self.interner.get_or_intern(s);
                 self.consts.push(ConstValue::Str(s));
