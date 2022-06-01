@@ -20,9 +20,17 @@ pub enum Token<'s> {
     KwEnd,
     #[token("defn")]
     KwDefn,
+    #[token("loop")]
+    KwLoop,
+    #[token("break")]
+    KwBreak,
 
+    #[token("+")]
+    Plus,
     #[token("-")]
     Minus,
+    #[token("==")]
+    Equals,
     #[token(".")]
     Accessor,
     #[token(",")]

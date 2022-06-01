@@ -13,6 +13,8 @@ pub enum Ast<'s, 'p> {
     Int(i64),
     Uint(u64),
 
+    Loop(Loop<'s, 'p>),
+
     Call(BoxedSpannedAst<'s, 'p>, BoxedSpannedAst<'s, 'p>),
     New(
         Spanned<'p, Token<'s>>,
@@ -33,6 +35,13 @@ pub struct Assignment<'s, 'p> {
     pub place: SpannedAst<'s, 'p>,
     pub assign: Spanned<'p, Token<'s>>,
     pub expr: SpannedAst<'s, 'p>,
+}
+
+#[derive(Debug)]
+pub struct Loop<'s, 'p> {
+    pub loop_: Spanned<'p, Token<'s>>,
+    pub body: SpannedAsts<'s, 'p>,
+    pub end: Spanned<'p, Token<'s>>,
 }
 
 #[derive(Debug)]
@@ -80,6 +89,13 @@ fn kw_end<'s, 'p>(
     }
 }
 
+fn kw_loop<'s, 'p>(
+) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> {
+    select! {
+        token @ Token::KwLoop, span =>  Spanned { span, inner: token }
+    }
+}
+
 fn place<'s, 'p>() -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>>
 {
     ident()
@@ -94,11 +110,19 @@ fn expression<'s: 'r, 'p: 'r, 'r>(
 ) -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> + 'r + Clone {
     recursive(|expression| {
         let paramlist = just(Token::LParen)
-            .then(expression.separated_by(just(Token::Comma)))
+            .then(expression.clone().separated_by(just(Token::Comma)))
             .then(just(Token::RParen))
             .map_with_span(|((_lparen, args), _rparen), span| Spanned {
                 span,
                 inner: Ast::Paramlist(args),
+            });
+
+        let loop_ = kw_loop()
+            .then(expression.repeated())
+            .then(kw_end())
+            .map_with_span(|((loop_, body), end), span| Spanned {
+                span,
+                inner: Ast::Loop(Loop { loop_, body, end }),
             });
 
         let string = select! {
@@ -132,7 +156,7 @@ fn expression<'s: 'r, 'p: 'r, 'r>(
 
         let literal = choice((string, number));
 
-        choice((literal, new, call, place()))
+        choice((literal, new, call, place(), loop_))
     })
 }
 

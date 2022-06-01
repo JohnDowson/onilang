@@ -35,7 +35,7 @@ fn main() -> Result<(), Error> {
             for e in errors {
                 eprintln!("{:?}", e);
             }
-            return Err(Error::Parser);
+            return Err(Error::parser(concat!(file!(), ":", line!())));
         }
     };
     if args.dump_ast {

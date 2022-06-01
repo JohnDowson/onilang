@@ -42,9 +42,41 @@ impl<'i> Vm<'i> {
             self.ip += 1;
 
             match op {
-                Opcode::Defslot(_, _) => todo!(),
-                Opcode::Assign(_) => todo!(),
-                Opcode::Read(_) => todo!(),
+                Opcode::Defslot(s, f) => {
+                    if self
+                        .env
+                        .insert(
+                            *s,
+                            Slot {
+                                flags: *f,
+                                value: Value::Undefined,
+                            },
+                        )
+                        .is_some()
+                    {
+                        return Err(Error::eval(concat!(file!(), ":", line!())));
+                    }
+                }
+
+                Opcode::Assign(s) => {
+                    let val = self
+                        .stack
+                        .pop()
+                        .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))?;
+                    self.env.entry(*s).and_modify(|slot| {
+                        slot.flags |= Flags::ASSIGNED;
+                        slot.value = val;
+                    });
+                }
+                Opcode::Read(s) => {
+                    let v = self
+                        .env
+                        .get(s)
+                        .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))?;
+                    self.stack.push(v.value.clone());
+                }
+                Opcode::LoadField(_) => todo!(),
+                Opcode::StoreField(_) => todo!(),
                 Opcode::Call(name) => match self.env.get(name) {
                     Some(Slot {
                         flags: _,
@@ -58,8 +90,8 @@ impl<'i> Vm<'i> {
                     }) => {
                         func(self);
                     }
-                    Some(_) => return Err(Error::Eval),
-                    None => return Err(Error::Eval),
+                    Some(_) => return Err(Error::eval(concat!(file!(), ":", line!()))),
+                    None => return Err(Error::eval(concat!(file!(), ":", line!()))),
                 },
                 &Opcode::Const(c) => self.stack.push(self.consts[c].into()),
             }
@@ -72,6 +104,7 @@ impl<'i> Vm<'i> {
     }
 }
 
+#[derive(Debug)]
 pub struct Slot {
     pub flags: Flags,
     pub value: Value,
@@ -119,9 +152,9 @@ pub enum ConstValue {
     Str(Spur),
 }
 
-impl Into<Value> for ConstValue {
-    fn into(self) -> Value {
-        match self {
+impl From<ConstValue> for Value {
+    fn from(cv: ConstValue) -> Value {
+        match cv {
             ConstValue::Int(i) => Value::Int(i),
             ConstValue::Uint(u) => Value::Uint(u),
             ConstValue::Float(f) => Value::Float(f),
@@ -136,5 +169,7 @@ pub enum Opcode {
     Assign(Spur),
     Call(Spur),
     Read(Spur),
+    LoadField(Spur),
+    StoreField(Spur),
     Const(usize),
 }
