@@ -15,6 +15,7 @@ type SpannedAst<'s, 'p> = Spanned<'p, Ast<'s, 'p>>;
 type SpannedAsts<'s, 'p> = Vec<Spanned<'p, Ast<'s, 'p>>>;
 type BoxedSpannedAst<'s, 'p> = Box<Spanned<'p, Ast<'s, 'p>>>;
 
+#[derive(Clone, Copy)]
 pub struct Spanned<'p, T> {
     pub span: Span<'p>,
     pub inner: T,
@@ -35,6 +36,16 @@ pub struct Span<'p> {
     path: &'p Path,
     start: usize,
     end: usize,
+}
+
+impl<'p> Span<'p> {
+    pub fn merge(a: &Self, b: &Self) -> Self {
+        Self {
+            path: a.path,
+            start: a.start,
+            end: b.end,
+        }
+    }
 }
 
 impl<'p> std::fmt::Debug for Span<'p> {

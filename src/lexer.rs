@@ -1,12 +1,14 @@
 use logos::Logos;
 
-#[derive(Debug, Logos, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Logos, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Token<'s> {
     #[regex("[a-zA-Z$_][a-zA-Z0-9$_]*", |l| l.slice())]
     Identifier(&'s str),
 
-    #[regex("[1-9][0-9]*|0", |l| l.slice().parse())]
-    Number(u64),
+    #[regex("[1-9][0-9]*|0", |l| l.slice())]
+    Number(&'s str),
+    #[regex(r"[0-9]+\.[0-9]+", |l| l.slice())]
+    Float(&'s str),
     #[regex(r#""[a-zA-Z]+""#, |l| l.slice())]
     String(&'s str),
 
@@ -31,8 +33,16 @@ pub enum Token<'s> {
     Plus,
     #[token("-")]
     Minus,
+    #[token("*")]
+    Star,
+    #[token("/")]
+    Slash,
+    #[token("%")]
+    Percent,
     #[token("==")]
     Equals,
+    #[token("!=")]
+    NotEquals,
     #[token(".")]
     Accessor,
     #[token(",")]

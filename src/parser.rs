@@ -1,18 +1,23 @@
 use crate::{lexer::Token, BoxedSpannedAst, Span, Spanned, SpannedAst, SpannedAsts};
-use chumsky::{prelude::*, Parser, Stream};
+use chumsky::{
+    pratt::{binary_infix_operator, Associativity, InfixOperator, InfixPrecedence},
+    prelude::*,
+    Parser, Stream,
+};
 
-#[derive(Debug)]
+#[derive(Clone)]
 pub enum Ast<'s, 'p> {
     Module(SpannedAsts<'s, 'p>),
 
     Defn(Box<Defn<'s, 'p>>),
 
     Assignment(Box<Assignment<'s, 'p>>),
+    UnaryOp(Spanned<'p, Token<'s>>, Box<SpannedAst<'s, 'p>>),
     BinOp(Box<BinOp<'s, 'p>>),
 
     String(&'s str),
-    Int(i64),
     Uint(u64),
+    Float(f64),
 
     Loop(Loop<'s, 'p>),
 
@@ -28,31 +33,65 @@ pub enum Ast<'s, 'p> {
 
     Identifier(&'s str),
 
-    Place(BoxedSpannedAst<'s, 'p>, SpannedAsts<'s, 'p>),
+    Access(Box<Access<'s, 'p>>),
 }
 
-#[derive(Debug)]
+impl<'s, 'p> std::fmt::Debug for Ast<'s, 'p> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Module(arg0) => f.debug_tuple("Module").field(arg0).finish(),
+            Self::Defn(arg0) => arg0.fmt(f),
+            Self::Assignment(arg0) => arg0.fmt(f),
+            Self::UnaryOp(arg0, arg1) => f.debug_tuple("UnaryOp").field(arg0).field(arg1).finish(),
+            Self::BinOp(arg0) => arg0.fmt(f),
+            Self::String(arg0) => f.debug_tuple("String").field(arg0).finish(),
+            Self::Uint(arg0) => f.debug_tuple("Uint").field(arg0).finish(),
+            Self::Float(arg0) => f.debug_tuple("Float").field(arg0).finish(),
+            Self::Loop(arg0) => arg0.fmt(f),
+            Self::Call(arg0, arg1) => f.debug_tuple("Call").field(arg0).field(arg1).finish(),
+            Self::New(arg0, arg1, arg2) => f
+                .debug_tuple("New")
+                .field(arg0)
+                .field(arg1)
+                .field(arg2)
+                .finish(),
+            Self::Arglist(arg0) => f.debug_tuple("Arglist").field(arg0).finish(),
+            Self::Paramlist(arg0) => f.debug_tuple("Paramlist").field(arg0).finish(),
+            Self::Identifier(arg0) => f.debug_tuple("Identifier").field(arg0).finish(),
+            Self::Access(arg0) => arg0.fmt(f),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Access<'s, 'p> {
+    pub base: SpannedAst<'s, 'p>,
+    pub accessor: Spanned<'p, Token<'s>>,
+    pub field: SpannedAst<'s, 'p>,
+}
+
+#[derive(Debug, Clone)]
 pub struct Assignment<'s, 'p> {
     pub place: SpannedAst<'s, 'p>,
     pub assign: Spanned<'p, Token<'s>>,
     pub expr: SpannedAst<'s, 'p>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BinOp<'s, 'p> {
     pub lhs: SpannedAst<'s, 'p>,
-    pub op: Spanned<'p, Token<'s>>,
+    pub op: Spanned<'p, Operator>,
     pub rhs: SpannedAst<'s, 'p>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Loop<'s, 'p> {
     pub loop_: Spanned<'p, Token<'s>>,
     pub body: SpannedAsts<'s, 'p>,
     pub end: Spanned<'p, Token<'s>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Defn<'s, 'p> {
     pub defn: Spanned<'p, Token<'s>>,
     pub name: SpannedAst<'s, 'p>,
@@ -62,149 +101,177 @@ pub struct Defn<'s, 'p> {
     pub end: Spanned<'p, Token<'s>>,
 }
 
-fn ident<'s, 'p>() -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>>
-{
+fn ident<'s, 'p>(
+) -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
     select! {
         Token::Identifier(i), span =>  Spanned{ span, inner: Ast::Identifier(i) }
     }
 }
 
 fn kw_do<'s, 'p>(
-) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> {
+) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
     select! {
         token @ Token::KwDo, span =>  Spanned { span, inner: token }
     }
 }
 
 fn kw_defn<'s, 'p>(
-) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> {
+) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
     select! {
         token @ Token::KwDefn, span =>  Spanned { span, inner: token }
     }
 }
 
 fn kw_new<'s, 'p>(
-) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> {
+) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
     select! {
         token @ Token::KwNew, span =>  Spanned { span, inner: token }
     }
 }
 
 fn kw_end<'s, 'p>(
-) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> {
+) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
     select! {
         token @ Token::KwEnd, span =>  Spanned { span, inner: token }
     }
 }
 
 fn kw_loop<'s, 'p>(
-) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> {
+) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
     select! {
         token @ Token::KwLoop, span =>  Spanned { span, inner: token }
     }
 }
 
-fn equals<'s, 'p>(
-) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> {
-    select! {
-        token @ Token::Equals, span =>  Spanned { span, inner: token }
+#[derive(Debug, Clone, Copy)]
+pub enum Operator {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Eq,
+    Ne,
+}
+
+impl<'s, 'p> InfixOperator<SpannedAst<'s, 'p>> for Spanned<'p, Operator> {
+    type Strength = u8;
+
+    fn precedence(&self) -> InfixPrecedence<Self::Strength> {
+        match self.inner {
+            Operator::Add => InfixPrecedence::new(0, Associativity::Left),
+            Operator::Sub => InfixPrecedence::new(0, Associativity::Left),
+            Operator::Mul => InfixPrecedence::new(1, Associativity::Left),
+            Operator::Div => InfixPrecedence::new(1, Associativity::Left),
+            Operator::Mod => InfixPrecedence::new(1, Associativity::Left),
+            Operator::Eq => InfixPrecedence::new(0, Associativity::Left),
+            Operator::Ne => InfixPrecedence::new(0, Associativity::Left),
+        }
+    }
+
+    fn build_expression(
+        self,
+        lhs: SpannedAst<'s, 'p>,
+        rhs: SpannedAst<'s, 'p>,
+    ) -> SpannedAst<'s, 'p> {
+        Spanned {
+            span: Span::merge(&lhs.span, &rhs.span),
+            inner: Ast::BinOp(box BinOp { lhs, op: self, rhs }),
+        }
     }
 }
 
-fn place<'s, 'p>() -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>>
-{
-    ident()
-        .then(just(Token::Accessor).ignore_then(ident()).repeated())
-        .map_with_span(|(base, accessors), span| Spanned {
-            span,
-            inner: Ast::Place(box base, accessors),
-        })
+fn operators<'s, 'p>(
+) -> impl Parser<Token<'s>, Spanned<'p, Operator>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
+    select! {
+        Token::Plus, span => Spanned { span, inner: Operator::Add},
+        Token::Minus, span => Spanned { span, inner: Operator::Sub},
+        Token::Star, span => Spanned { span, inner: Operator::Mul},
+        Token::Slash, span => Spanned { span, inner: Operator::Div},
+        Token::Percent, span => Spanned { span, inner: Operator::Mod},
+        Token::Equals, span => Spanned { span, inner: Operator::Eq},
+        Token::NotEquals, span => Spanned { span, inner: Operator::Ne},
+    }
 }
 
 fn expression<'s: 'r, 'p: 'r, 'r>(
 ) -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> + 'r + Clone {
     recursive(|expression| {
-        let paramlist = just(Token::LParen)
-            .then(expression.clone().separated_by(just(Token::Comma)))
-            .then(just(Token::RParen))
-            .map_with_span(|((_lparen, args), _rparen), span| Spanned {
-                span,
-                inner: Ast::Paramlist(args),
-            });
-
-        let bin_op = expression
+        let paren_expr = expression
             .clone()
-            .then(choice((equals(),)))
-            .then(expression.clone())
-            .map_with_span(|((lhs, op), rhs), span| Spanned {
-                span,
-                inner: Ast::BinOp(box BinOp { lhs, op, rhs }),
-            });
-
-        let loop_ = kw_loop()
-            .then(expression.repeated())
-            .then(kw_end())
-            .map_with_span(|((loop_, body), end), span| Spanned {
-                span,
-                inner: Ast::Loop(Loop { loop_, body, end }),
-            });
+            .delimited_by(just(Token::LParen), just(Token::RParen))
+            .debug("paren_expr");
 
         let string = select! {
             Token::String(s), span => Spanned { span, inner: Ast::String(s) }
-        };
+        }
+        .debug("string");
 
         let uint = select! {
-            Token::Number(n), span => Spanned { span, inner: Ast::Uint(n) }
-        };
+            Token::Number(n), span => Spanned { span, inner: Ast::Uint(n.parse().map_err(|e| Simple::custom(span, e))?) }
+        }.debug("uint");
 
-        let int = just(Token::Minus).ignore_then(select! {
-            Token::Number(n), span => Spanned { span, inner: Ast::Int(-(n as i64)) }
-        });
+        let float = select! {
+            Token::Float(n), span => Spanned { span, inner: Ast::Float(n.parse().map_err(|e| Simple::custom(span, e))?) }
+        }.debug("float");
 
-        let new = kw_new()
-            .then(paramlist.clone().or_not())
-            .then(ident())
-            .map_with_span(|((new, params), ty), span| Spanned {
+        let number = choice((uint, float)).debug("number");
+
+        let literal = choice((string, number)).debug("literal");
+
+        let atom = choice((ident(), literal, paren_expr)).debug("atom");
+
+        let unary = select! { token @ Token::Minus, span => Spanned { span, inner: token } }
+            .then(atom.clone())
+            .map_with_span(|(op, atom), span| Spanned {
                 span,
-                inner: Ast::New(new, params.map(|p| box p), box ty),
-            });
+                inner: Ast::UnaryOp(op, box atom),
+            })
+            .debug("unary");
 
-        let call = ident()
-            .then(paramlist)
-            .map_with_span(|(name, params), span| Spanned {
+        let accessor = select! {
+            token @ Token::Accessor, span => Spanned { span, inner: token }
+        }
+        .debug("accessor");
+
+        let access = choice((atom.clone(), unary.clone()))
+            .then(accessor.then(ident()).repeated())
+            .foldl(|base, (accessor, field)| Spanned {
+                span: Span::merge(&base.span, &field.span),
+                inner: Ast::Access(box Access {
+                    base,
+                    accessor,
+                    field,
+                }),
+            })
+            .debug("access");
+
+        let bin_op = binary_infix_operator(choice((atom.clone(), unary.clone())), operators())
+            .debug("binop");
+
+        let assignment = choice((ident(), access.clone()))
+            .then(select! {
+                token @ Token::Assign, span => Spanned { span, inner: token },
+                token @ Token::ImmutDeclAssign, span => Spanned { span, inner: token },
+                token @ Token::DeclAssign, span => Spanned { span, inner: token },
+            })
+            .then(expression)
+            .map_with_span(|((place, assign), expr), span| Spanned {
                 span,
-                inner: Ast::Call(box name, box params),
-            });
+                inner: Ast::Assignment(box Assignment {
+                    place,
+                    assign,
+                    expr,
+                }),
+            })
+            .debug("assignment");
 
-        let number = choice((uint, int));
-
-        let literal = choice((string, number));
-
-        choice((literal, new, call, place(), loop_, bin_op))
+        choice((atom, access, assignment, bin_op))
     })
 }
 
-fn assignment<'s: 'r, 'p: 'r, 'r>(
-) -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> + 'r {
-    place()
-        .then(select! {
-            token @ Token::Assign, span => Spanned { span, inner: token },
-            token @ Token::ImmutDeclAssign, span => Spanned { span, inner: token },
-            token @ Token::DeclAssign, span => Spanned { span, inner: token },
-        })
-        .then(expression())
-        .map_with_span(|((place, assign), expr), span| Spanned {
-            span,
-            inner: Ast::Assignment(box Assignment {
-                place,
-                assign,
-                expr,
-            }),
-        })
-}
-
 fn arglist<'s, 'p>(
-) -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> {
+) -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
     just(Token::LParen)
         .then(ident().separated_by(just(Token::Comma)))
         .then(just(Token::RParen))
@@ -215,12 +282,12 @@ fn arglist<'s, 'p>(
 }
 
 fn body<'s: 'r, 'p: 'r, 'r>(
-) -> impl Parser<Token<'s>, SpannedAsts<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> + 'r {
-    choice((assignment(), expression())).repeated()
+) -> impl Parser<Token<'s>, SpannedAsts<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> + 'r + Clone {
+    choice((expression(),)).repeated()
 }
 
 fn defn<'s: 'r, 'p: 'r, 'r>(
-) -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> + 'r {
+) -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> + 'r + Clone {
     kw_defn()
         .then(ident())
         .then(arglist())
@@ -255,5 +322,10 @@ pub fn parse<'s, 'p>(
     tokens: Vec<(Token<'s>, Span<'p>)>,
 ) -> Result<SpannedAst<'s, 'p>, Vec<Simple<Token<'s>, Span<'p>>>> {
     let stream = Stream::from_iter(tokens.last().unwrap().1, tokens.into_iter());
-    implicit_module().parse(stream)
+    let (r, e) = implicit_module().parse_recovery_verbose(stream);
+    if let Some(r) = r {
+        Ok(r)
+    } else {
+        Err(e)
+    }
 }

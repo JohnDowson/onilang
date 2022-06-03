@@ -6,7 +6,7 @@ use crate::{
     error::Error,
     eval::{ConstValue, Flags, Opcode, Vm},
     lexer::Token,
-    parser::{Assignment, Ast, Defn},
+    parser::{Access, Assignment, Ast, BinOp, Defn, Operator},
     Spanned, SpannedAst,
 };
 
@@ -115,20 +115,13 @@ impl<'i> Compiler<'i> {
             Ast::Assignment(box Assignment {
                 place:
                     Spanned {
-                        span: _,
-                        inner:
-                            Ast::Place(
-                                box Spanned {
-                                    span: _,
-                                    inner: Ast::Identifier(object_ident),
-                                },
-                                mut accessors,
-                            ),
+                        span: _base_span,
+                        inner: Ast::Identifier(base_ident),
                     },
                 assign,
                 expr,
             }) => {
-                let object_name = self.interner.get_or_intern(object_ident);
+                let object_name = self.interner.get_or_intern(base_ident);
                 match assign.inner {
                     Token::ImmutDeclAssign => func
                         .code
@@ -139,54 +132,57 @@ impl<'i> Compiler<'i> {
                     Token::Assign => (),
                     _ => return Err(Error::compiler(concat!(file!(), ":", line!()))),
                 }
-                if let Some(Spanned {
-                    span: _,
-                    inner: Ast::Identifier(field_ident),
-                }) = accessors.pop()
-                {
-                    func.code.push(Opcode::Read(object_name));
-                    let last_field_name = self.interner.get_or_intern(field_ident);
-
-                    for accessor in accessors {
-                        if let Spanned {
-                            span: _,
-                            inner: Ast::Identifier(ident),
-                        } = accessor
-                        {
-                            let name = self.interner.get_or_intern(ident);
-                            func.code.push(Opcode::LoadField(name));
-                        } else {
-                            return Err(Error::compiler(concat!(file!(), ":", line!())));
-                        }
-                    }
-
-                    self.compile_expr(func, expr)?;
-
-                    func.code.push(Opcode::StoreField(last_field_name));
-                } else {
-                    self.compile_expr(func, expr)?;
-                    func.code.push(Opcode::Assign(object_name));
-                };
+                self.compile_expr(func, expr)?;
+                func.code.push(Opcode::Assign(object_name));
 
                 Ok(())
             }
             Ast::Assignment(_) => Err(Error::compiler(concat!(file!(), ":", line!()))),
-            Ast::BinOp(_) => todo!(),
+            Ast::UnaryOp(..) => todo!(),
+            Ast::BinOp(box BinOp {
+                lhs,
+                op:
+                    Spanned {
+                        span: _op_span,
+                        inner: op,
+                    },
+                rhs,
+            }) => {
+                self.compile_expr(func, lhs)?;
+                self.compile_expr(func, rhs)?;
+                match op {
+                    Operator::Add => {
+                        func.code.push(Opcode::Add);
+                    }
+                    Operator::Sub => {
+                        func.code.push(Opcode::Sub);
+                    }
+                    Operator::Mul => {
+                        func.code.push(Opcode::Mul);
+                    }
+                    Operator::Div => {
+                        func.code.push(Opcode::Div);
+                    }
+                    Operator::Mod => todo!(),
+                    Operator::Eq => todo!(),
+                    Operator::Ne => todo!(),
+                }
+                Ok(())
+            }
             Ast::String(s) => {
                 let s = self.interner.get_or_intern(s);
                 self.consts.push(ConstValue::Str(s));
                 func.code.push(Opcode::Const(self.consts.len() - 1));
                 Ok(())
             }
-            Ast::Int(i) => {
-                self.consts.push(ConstValue::Int(i));
-                func.code.push(Opcode::Const(self.consts.len() - 1));
-                Ok(())
-            }
+
             Ast::Uint(i) => {
                 self.consts.push(ConstValue::Uint(i));
                 func.code.push(Opcode::Const(self.consts.len() - 1));
                 Ok(())
+            }
+            Ast::Float(..) => {
+                todo!()
             }
             Ast::Loop(_) => todo!(),
             Ast::Call(
@@ -210,19 +206,26 @@ impl<'i> Compiler<'i> {
             Ast::New(_, _, _) => todo!(),
             Ast::Arglist(_) => todo!(),
             Ast::Paramlist(_) => todo!(),
-            Ast::Identifier(_) => todo!(),
-            Ast::Place(
-                box Spanned {
-                    span: _,
-                    inner: Ast::Identifier(ident),
-                },
-                _accessors,
-            ) => {
+            Ast::Identifier(ident) => {
                 let ident = self.interner.get_or_intern(ident);
                 func.code.push(Opcode::Read(ident));
                 Ok(())
             }
-            Ast::Place(..) => Err(Error::compiler(concat!(file!(), ":", line!()))),
+            Ast::Access(box Access {
+                base,
+                accessor: _,
+                field:
+                    Spanned {
+                        span: _field_span,
+                        inner: Ast::Identifier(ident),
+                    },
+            }) => {
+                self.compile_expr(func, base)?;
+                let ident = self.interner.get_or_intern(ident);
+                func.code.push(Opcode::LoadField(ident));
+                Ok(())
+            }
+            Ast::Access(..) => Err(Error::compiler(concat!(file!(), ":", line!()))),
         }
     }
 

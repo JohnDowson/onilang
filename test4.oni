@@ -1,0 +1,3 @@
+defn main() do
+  1+1
+end

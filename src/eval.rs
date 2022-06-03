@@ -94,6 +94,25 @@ impl<'i> Vm<'i> {
                     None => return Err(Error::eval(concat!(file!(), ":", line!()))),
                 },
                 &Opcode::Const(c) => self.stack.push(self.consts[c].into()),
+
+                Opcode::Add => {
+                    let b = self
+                        .stack
+                        .pop()
+                        .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))?;
+                    let a = self
+                        .stack
+                        .pop()
+                        .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))?;
+                    let r = match (a, b) {
+                        (Value::Uint(a), Value::Uint(b)) => Value::Uint(a + b),
+                        _ => todo!(),
+                    };
+                    self.stack.push(r);
+                }
+                Opcode::Sub => todo!(),
+                Opcode::Mul => todo!(),
+                Opcode::Div => todo!(),
             }
 
             if self.ip == self.code.len() {
@@ -172,4 +191,9 @@ pub enum Opcode {
     LoadField(Spur),
     StoreField(Spur),
     Const(usize),
+
+    Add,
+    Sub,
+    Mul,
+    Div,
 }
