@@ -1,0 +1,8 @@
+destruc String do
+  buf
+  len
+end
+
+defn main() do
+  a := new("Hello") String
+end

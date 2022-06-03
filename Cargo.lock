@@ -57,7 +57,7 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 [[package]]
 name = "chumsky"
 version = "0.8.0"
-source = "git+https://github.com/zesterer/chumsky.git#2cdcd859ccd1ba90869631c2117be4185f44ac63"
+source = "git+https://github.com/alvra/chumsky.git?branch=pratt#b45eb47dce2743dce6afca66ee0f99e58e15d2f2"
 dependencies = [
  "hashbrown",
  "stacker",

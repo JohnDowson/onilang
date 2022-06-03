@@ -63,10 +63,12 @@ impl<'i> Vm<'i> {
                         .stack
                         .pop()
                         .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))?;
-                    self.env.entry(*s).and_modify(|slot| {
+                    if let Some(slot) = self.env.get_mut(s) {
                         slot.flags |= Flags::ASSIGNED;
                         slot.value = val;
-                    });
+                    } else {
+                        return Err(Error::eval(concat!(file!(), ":", line!())));
+                    };
                 }
                 Opcode::Read(s) => {
                     let v = self
@@ -75,25 +77,57 @@ impl<'i> Vm<'i> {
                         .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))?;
                     self.stack.push(v.value.clone());
                 }
-                Opcode::LoadField(_) => todo!(),
+                Opcode::LoadField(name) => {
+                    let obj = self
+                        .stack
+                        .pop()
+                        .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))?;
+                    let field = match obj {
+                        Value::Int(_) => todo!(),
+                        Value::Uint(_) => todo!(),
+                        Value::Float(_) => todo!(),
+                        Value::String(_) => todo!(),
+                        Value::Str(_) => todo!(),
+                        Value::Func(_) => todo!(),
+                        Value::Object(obj) => obj
+                            .get(name)
+                            .cloned()
+                            .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))?,
+                        Value::Undefined => todo!(),
+                    };
+                    self.stack.push(field);
+                }
                 Opcode::StoreField(_) => todo!(),
-                Opcode::Call(name) => match self.env.get(name) {
-                    Some(Slot {
-                        flags: _,
-                        value: Value::Func(RuntimeFunc::Virtual(func)),
-                    }) => {
+                Opcode::Call => match self.stack.pop() {
+                    Some(Value::Func(RuntimeFunc::Virtual(func))) => {
                         self.code = Rc::clone(&func.code);
                     }
-                    Some(Slot {
-                        flags: _,
-                        value: Value::Func(RuntimeFunc::Native(func)),
-                    }) => {
+                    Some(Value::Func(RuntimeFunc::Native(func))) => {
                         func(self);
                     }
                     Some(_) => return Err(Error::eval(concat!(file!(), ":", line!()))),
                     None => return Err(Error::eval(concat!(file!(), ":", line!()))),
                 },
                 &Opcode::Const(c) => self.stack.push(self.consts[c].into()),
+
+                Opcode::Add => {
+                    let b = self
+                        .stack
+                        .pop()
+                        .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))?;
+                    let a = self
+                        .stack
+                        .pop()
+                        .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))?;
+                    let r = match (a, b) {
+                        (Value::Uint(a), Value::Uint(b)) => Value::Uint(a + b),
+                        _ => todo!(),
+                    };
+                    self.stack.push(r);
+                }
+                Opcode::Sub => todo!(),
+                Opcode::Mul => todo!(),
+                Opcode::Div => todo!(),
             }
 
             if self.ip == self.code.len() {
@@ -126,6 +160,7 @@ pub enum Value {
     String(String),
     Str(Spur),
     Func(RuntimeFunc),
+    Object(HashMap<Spur, Value>),
     Undefined,
 }
 
@@ -167,9 +202,14 @@ impl From<ConstValue> for Value {
 pub enum Opcode {
     Defslot(Spur, Flags),
     Assign(Spur),
-    Call(Spur),
+    Call,
     Read(Spur),
     LoadField(Spur),
     StoreField(Spur),
     Const(usize),
+
+    Add,
+    Sub,
+    Mul,
+    Div,
 }
