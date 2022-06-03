@@ -112,6 +112,9 @@ impl<'i> Compiler<'i> {
         match expr.inner {
             Ast::Module(_) => Err(Error::compiler(concat!(file!(), ":", line!()))),
             Ast::Defn(_) => Err(Error::compiler(concat!(file!(), ":", line!()))),
+            Ast::Lambda(..) => {
+                todo!()
+            }
             Ast::Assignment(box Assignment {
                 place:
                     Spanned {
@@ -186,26 +189,41 @@ impl<'i> Compiler<'i> {
             }
             Ast::Loop(_) => todo!(),
             Ast::Call(
-                box Spanned {
-                    span: _name_span,
-                    inner: Ast::Identifier(name),
-                },
+                box callee,
                 box Spanned {
                     span: _params_span,
-                    inner: Ast::Paramlist(params),
+                    inner: Ast::Paramlist(_, params, _),
                 },
             ) => {
-                let name = self.interner.get_or_intern(name);
                 for param in params {
                     self.compile_expr(func, param)?;
                 }
-                func.code.push(Opcode::Call(name));
+
+                self.compile_expr(func, callee)?;
+                func.code.push(Opcode::Call);
                 Ok(())
             }
             Ast::Call(..) => unimplemented!(),
-            Ast::New(_, _, _) => todo!(),
+            Ast::New(_, params, box ty) => {
+                if let Some(box Spanned {
+                    span: _,
+                    inner: Ast::Paramlist(_, params, _),
+                }) = params
+                {
+                    for param in params {
+                        self.compile_expr(func, param)?;
+                    }
+                };
+
+                self.compile_expr(func, ty)?;
+
+                let init = self.interner.get_or_intern("__init__");
+                func.code.push(Opcode::LoadField(init));
+                func.code.push(Opcode::Call);
+                Ok(())
+            }
             Ast::Arglist(_) => todo!(),
-            Ast::Paramlist(_) => todo!(),
+            Ast::Paramlist(..) => todo!(),
             Ast::Identifier(ident) => {
                 let ident = self.interner.get_or_intern(ident);
                 func.code.push(Opcode::Read(ident));

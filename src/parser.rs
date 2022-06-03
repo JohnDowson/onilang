@@ -10,6 +10,7 @@ pub enum Ast<'s, 'p> {
     Module(SpannedAsts<'s, 'p>),
 
     Defn(Box<Defn<'s, 'p>>),
+    Lambda(BoxedSpannedAst<'s, 'p>, SpannedAsts<'s, 'p>),
 
     Assignment(Box<Assignment<'s, 'p>>),
     UnaryOp(Spanned<'p, Token<'s>>, Box<SpannedAst<'s, 'p>>),
@@ -29,7 +30,11 @@ pub enum Ast<'s, 'p> {
     ),
 
     Arglist(SpannedAsts<'s, 'p>),
-    Paramlist(SpannedAsts<'s, 'p>),
+    Paramlist(
+        Spanned<'p, Token<'s>>,
+        SpannedAsts<'s, 'p>,
+        Spanned<'p, Token<'s>>,
+    ),
 
     Identifier(&'s str),
 
@@ -41,6 +46,7 @@ impl<'s, 'p> std::fmt::Debug for Ast<'s, 'p> {
         match self {
             Self::Module(arg0) => f.debug_tuple("Module").field(arg0).finish(),
             Self::Defn(arg0) => arg0.fmt(f),
+            Self::Lambda(arg0, arg1) => f.debug_tuple("Lambda").field(arg0).field(arg1).finish(),
             Self::Assignment(arg0) => arg0.fmt(f),
             Self::UnaryOp(arg0, arg1) => f.debug_tuple("UnaryOp").field(arg0).field(arg1).finish(),
             Self::BinOp(arg0) => arg0.fmt(f),
@@ -56,7 +62,12 @@ impl<'s, 'p> std::fmt::Debug for Ast<'s, 'p> {
                 .field(arg2)
                 .finish(),
             Self::Arglist(arg0) => f.debug_tuple("Arglist").field(arg0).finish(),
-            Self::Paramlist(arg0) => f.debug_tuple("Paramlist").field(arg0).finish(),
+            Self::Paramlist(arg0, arg1, arg2) => f
+                .debug_tuple("Paramlist")
+                .field(arg0)
+                .field(arg1)
+                .field(arg2)
+                .finish(),
             Self::Identifier(arg0) => f.debug_tuple("Identifier").field(arg0).finish(),
             Self::Access(arg0) => arg0.fmt(f),
         }
@@ -112,6 +123,13 @@ fn kw_do<'s, 'p>(
 ) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
     select! {
         token @ Token::KwDo, span =>  Spanned { span, inner: token }
+    }
+}
+
+fn pointy<'s, 'p>(
+) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
+    select! {
+        token @ Token::Pointy, span =>  Spanned { span, inner: token }
     }
 }
 
@@ -229,13 +247,26 @@ fn expression<'s: 'r, 'p: 'r, 'r>(
             })
             .debug("unary");
 
+        let lambda = arglist()
+            .then_ignore(pointy())
+            .then(
+                expression
+                    .clone()
+                    .repeated()
+                    .delimited_by(just(Token::LCurly), just(Token::RCurly)),
+            )
+            .map_with_span(|(args, body), span| Spanned {
+                span,
+                inner: Ast::Lambda(box args, body),
+            });
+
         let accessor = select! {
             token @ Token::Accessor, span => Spanned { span, inner: token }
         }
         .debug("accessor");
 
-        let access = choice((atom.clone(), unary.clone()))
-            .then(accessor.then(ident()).repeated())
+        let access = choice((unary.clone(), atom.clone()))
+            .then(accessor.then(ident()).repeated().at_least(1))
             .foldl(|base, (accessor, field)| Spanned {
                 span: Span::merge(&base.span, &field.span),
                 inner: Ast::Access(box Access {
@@ -246,10 +277,36 @@ fn expression<'s: 'r, 'p: 'r, 'r>(
             })
             .debug("access");
 
-        let bin_op = binary_infix_operator(choice((atom.clone(), unary.clone())), operators())
-            .debug("binop");
+        let bin_op = binary_infix_operator(
+            choice((access.clone(), unary.clone(), atom.clone())),
+            operators(),
+        )
+        .debug("binop");
 
-        let assignment = choice((ident(), access.clone()))
+        let paramlist = select! { token @ Token::LParen, span => Spanned { span, inner: token} }
+            .then(expression.clone().separated_by(just(Token::Comma)))
+            .then(select! { token @ Token::RParen, span => Spanned { span, inner: token} })
+            .map_with_span(|((lparen, params), rparen), span| Spanned {
+                span,
+                inner: Ast::Paramlist(lparen, params, rparen),
+            });
+
+        let call = choice((access.clone(), ident()))
+            .then(paramlist.clone())
+            .map_with_span(|(callee, params), span| Spanned {
+                span,
+                inner: Ast::Call(box callee, box params),
+            });
+
+        let new = kw_new()
+            .then(paramlist.or_not())
+            .then(ident())
+            .map_with_span(|((new, params), ty), span| Spanned {
+                span,
+                inner: Ast::New(new, params.map(|p| box p), box ty),
+            });
+
+        let assignment = choice((access.clone(), ident()))
             .then(select! {
                 token @ Token::Assign, span => Spanned { span, inner: token },
                 token @ Token::ImmutDeclAssign, span => Spanned { span, inner: token },
@@ -266,7 +323,7 @@ fn expression<'s: 'r, 'p: 'r, 'r>(
             })
             .debug("assignment");
 
-        choice((atom, access, assignment, bin_op))
+        choice((lambda, new, call, access, assignment, bin_op, atom))
     })
 }
 
@@ -322,10 +379,6 @@ pub fn parse<'s, 'p>(
     tokens: Vec<(Token<'s>, Span<'p>)>,
 ) -> Result<SpannedAst<'s, 'p>, Vec<Simple<Token<'s>, Span<'p>>>> {
     let stream = Stream::from_iter(tokens.last().unwrap().1, tokens.into_iter());
-    let (r, e) = implicit_module().parse_recovery_verbose(stream);
-    if let Some(r) = r {
-        Ok(r)
-    } else {
-        Err(e)
-    }
+
+    implicit_module().parse(stream)
 }

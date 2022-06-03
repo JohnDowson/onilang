@@ -22,6 +22,8 @@ pub enum Token<'s> {
     KwEnd,
     #[token("defn")]
     KwDefn,
+    #[token("destruc")]
+    KwDestruc,
     #[token("loop")]
     KwLoop,
     #[token("break")]
@@ -45,12 +47,22 @@ pub enum Token<'s> {
     NotEquals,
     #[token(".")]
     Accessor,
+    #[token("->")]
+    Pointy,
     #[token(",")]
     Comma,
     #[token("(")]
     LParen,
     #[token(")")]
     RParen,
+    #[token("[")]
+    LBracket,
+    #[token("]")]
+    RBracket,
+    #[token("{")]
+    LCurly,
+    #[token("}")]
+    RCurly,
     #[token(";")]
     Semicolon,
 
