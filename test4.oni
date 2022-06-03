@@ -1,8 +1,7 @@
-destruc String do
-  buf
-  len
+defn foo(a) do
+  print(a)
 end
 
 defn main() do
-  a := new("Hello") String
+  foo(69)
 end

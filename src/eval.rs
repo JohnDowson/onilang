@@ -1,19 +1,14 @@
-use lasso::{Rodeo, Spur};
-
 use crate::{compiler::FuncProto, error::Error};
-use std::{collections::HashMap, rc::Rc};
+use lasso::{Rodeo, Spur};
+use std::{collections::HashMap, rc::Rc, sync::RwLock};
 
-pub struct Vm<'i> {
-    env: HashMap<Spur, Slot>,
-    interner: &'i mut Rodeo,
-    stack: Vec<Value>,
-    code: Rc<[Opcode]>,
-    ip: usize,
-    consts: Vec<ConstValue>,
+pub struct Env {
+    parent: Option<Rc<Env>>,
+    inner: RwLock<HashMap<Spur, Slot>>,
 }
 
-impl<'i> Vm<'i> {
-    pub fn new(code: Rc<[Opcode]>, consts: Vec<ConstValue>, interner: &'i mut Rodeo) -> Self {
+impl Env {
+    fn new(interner: &mut Rodeo) -> Self {
         let mut env = HashMap::default();
         env.insert(
             interner.get_or_intern_static("print"),
@@ -26,7 +21,70 @@ impl<'i> Vm<'i> {
             },
         );
         Self {
-            env,
+            parent: None,
+            inner: RwLock::new(env),
+        }
+    }
+
+    fn with_parent(parent: Rc<Env>) -> Self {
+        Self {
+            parent: Some(parent),
+            inner: RwLock::new(HashMap::new()),
+        }
+    }
+
+    fn defslot(&self, k: Spur, flags: Flags) -> Result<Option<Slot>, Error> {
+        Ok(self
+            .inner
+            .write()
+            .map_err(|e| Error::eval(concat!(file!(), ":", line!())))?
+            .insert(
+                k,
+                Slot {
+                    flags,
+                    value: Value::Undefined,
+                },
+            ))
+    }
+
+    fn assign(&self, k: &Spur, v: Value) -> Result<(), Error> {
+        if let Some(slot) = self
+            .inner
+            .write()
+            .map_err(|e| Error::eval(concat!(file!(), ":", line!())))?
+            .get_mut(k)
+        {
+            slot.flags |= Flags::ASSIGNED;
+            slot.value = v;
+            Ok(())
+        } else {
+            Err(Error::eval(concat!(file!(), ":", line!())))
+        }
+    }
+
+    fn read(&self, k: &Spur) -> Result<Value, Error> {
+        self.inner
+            .read()
+            .map_err(|e| Error::eval(concat!(file!(), ":", line!())))?
+            .get(k)
+            .map(|s| s.value.clone())
+            .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))
+    }
+}
+
+pub struct Vm<'i> {
+    env: Env,
+    interner: &'i mut Rodeo,
+    stack: Vec<Value>,
+    code: Rc<[Opcode]>,
+    ip: usize,
+    consts: Vec<ConstValue>,
+}
+
+impl<'i> Vm<'i> {
+    pub fn new(code: Rc<[Opcode]>, consts: Vec<ConstValue>, interner: &'i mut Rodeo) -> Self {
+        Self {
+            env: Env::new(interner),
             interner,
             stack: Vec::new(),
             code,
@@ -43,19 +101,7 @@ impl<'i> Vm<'i> {
 
             match op {
                 Opcode::Defslot(s, f) => {
-                    if self
-                        .env
-                        .insert(
-                            *s,
-                            Slot {
-                                flags: *f,
-                                value: Value::Undefined,
-                            },
-                        )
-                        .is_some()
-                    {
-                        return Err(Error::eval(concat!(file!(), ":", line!())));
-                    }
+                    self.env.defslot(*s, *f)?;
                 }
 
                 Opcode::Assign(s) => {
@@ -63,19 +109,11 @@ impl<'i> Vm<'i> {
                         .stack
                         .pop()
                         .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))?;
-                    if let Some(slot) = self.env.get_mut(s) {
-                        slot.flags |= Flags::ASSIGNED;
-                        slot.value = val;
-                    } else {
-                        return Err(Error::eval(concat!(file!(), ":", line!())));
-                    };
+                    self.env.assign(s, val)?
                 }
                 Opcode::Read(s) => {
-                    let v = self
-                        .env
-                        .get(s)
-                        .ok_or_else(|| Error::eval(concat!(file!(), ":", line!())))?;
-                    self.stack.push(v.value.clone());
+                    let v = self.env.read(s)?;
+                    self.stack.push(v);
                 }
                 Opcode::LoadField(name) => {
                     let obj = self

@@ -11,6 +11,12 @@ pub enum Ast<'s, 'p> {
 
     Defn(Box<Defn<'s, 'p>>),
     Lambda(BoxedSpannedAst<'s, 'p>, SpannedAsts<'s, 'p>),
+    Destruc(Box<Destruc<'s, 'p>>),
+    Property(
+        BoxedSpannedAst<'s, 'p>,
+        Spanned<'p, Token<'s>>,
+        BoxedSpannedAst<'s, 'p>,
+    ),
 
     Assignment(Box<Assignment<'s, 'p>>),
     UnaryOp(Spanned<'p, Token<'s>>, Box<SpannedAst<'s, 'p>>),
@@ -47,6 +53,13 @@ impl<'s, 'p> std::fmt::Debug for Ast<'s, 'p> {
             Self::Module(arg0) => f.debug_tuple("Module").field(arg0).finish(),
             Self::Defn(arg0) => arg0.fmt(f),
             Self::Lambda(arg0, arg1) => f.debug_tuple("Lambda").field(arg0).field(arg1).finish(),
+            Self::Destruc(arg0) => arg0.fmt(f),
+            Self::Property(arg0, arg1, arg2) => f
+                .debug_tuple("Property")
+                .field(arg0)
+                .field(arg1)
+                .field(arg2)
+                .finish(),
             Self::Assignment(arg0) => arg0.fmt(f),
             Self::UnaryOp(arg0, arg1) => f.debug_tuple("UnaryOp").field(arg0).field(arg1).finish(),
             Self::BinOp(arg0) => arg0.fmt(f),
@@ -112,6 +125,15 @@ pub struct Defn<'s, 'p> {
     pub end: Spanned<'p, Token<'s>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct Destruc<'s, 'p> {
+    pub destruc: Spanned<'p, Token<'s>>,
+    pub name: SpannedAst<'s, 'p>,
+    pub _do: Spanned<'p, Token<'s>>,
+    pub body: SpannedAsts<'s, 'p>,
+    pub end: Spanned<'p, Token<'s>>,
+}
+
 fn ident<'s, 'p>(
 ) -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
     select! {
@@ -133,10 +155,24 @@ fn pointy<'s, 'p>(
     }
 }
 
+fn colon<'s, 'p>(
+) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
+    select! {
+        token @ Token::Colon, span =>  Spanned { span, inner: token }
+    }
+}
+
 fn kw_defn<'s, 'p>(
 ) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
     select! {
         token @ Token::KwDefn, span =>  Spanned { span, inner: token }
+    }
+}
+
+fn kw_destruc<'s, 'p>(
+) -> impl Parser<Token<'s>, Spanned<'p, Token<'s>>, Error = Simple<Token<'s>, Span<'p>>> + Clone {
+    select! {
+        token @ Token::KwDestruc, span =>  Spanned { span, inner: token }
     }
 }
 
@@ -364,9 +400,37 @@ fn defn<'s: 'r, 'p: 'r, 'r>(
         })
 }
 
+fn destruc<'s: 'r, 'p: 'r, 'r>(
+) -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> + 'r + Clone {
+    kw_destruc()
+        .then(ident())
+        .then(kw_do())
+        .then(
+            ident()
+                .then(colon())
+                .then(ident())
+                .map_with_span(|((name, colon), ty), span| Spanned {
+                    span,
+                    inner: Ast::Property(box name, colon, box ty),
+                })
+                .repeated(),
+        )
+        .then(kw_end())
+        .map_with_span(|((((destruc, name), _do), body), end), span| Spanned {
+            span,
+            inner: Ast::Destruc(box Destruc {
+                destruc,
+                name,
+                _do,
+                body,
+                end,
+            }),
+        })
+}
+
 fn implicit_module<'s: 'r, 'p: 'r, 'r>(
 ) -> impl Parser<Token<'s>, SpannedAst<'s, 'p>, Error = Simple<Token<'s>, Span<'p>>> + 'r {
-    choice((defn(),))
+    choice((defn(), destruc()))
         .repeated()
         .then_ignore(end())
         .map_with_span(|items, span| Spanned {

@@ -63,8 +63,8 @@ pub enum Token<'s> {
     LCurly,
     #[token("}")]
     RCurly,
-    #[token(";")]
-    Semicolon,
+    #[token(":")]
+    Colon,
 
     #[token("$=")]
     ImmutDeclAssign,

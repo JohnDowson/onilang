@@ -104,6 +104,39 @@ impl<'i> Compiler<'i> {
         Ok(())
     }
 
+    fn compile_lambda(
+        &mut self,
+        func: &mut IncompleteFuncProto,
+        lambda: Spanned<Ast>,
+    ) -> Result<(), Error> {
+        if let Spanned {
+            span: _,
+            inner:
+                Ast::Lambda(
+                    box Spanned {
+                        span: _,
+                        inner: Ast::Arglist(args),
+                    },
+                    body,
+                ),
+        } = lambda
+        {
+            let mut lambda = IncompleteFuncProto {
+                code: Default::default(),
+            };
+            for arg in args {
+                let arg = if let Ast::Identifier(ident) = arg.inner {
+                    self.interner.get_or_intern(ident)
+                } else {
+                    return Err(Error::compiler(concat!(file!(), ":", line!())));
+                };
+            }
+            Ok(())
+        } else {
+            Err(Error::compiler(concat!(file!(), ":", line!())))
+        }
+    }
+
     fn compile_expr(
         &mut self,
         func: &mut IncompleteFuncProto,
@@ -112,9 +145,9 @@ impl<'i> Compiler<'i> {
         match expr.inner {
             Ast::Module(_) => Err(Error::compiler(concat!(file!(), ":", line!()))),
             Ast::Defn(_) => Err(Error::compiler(concat!(file!(), ":", line!()))),
-            Ast::Lambda(..) => {
-                todo!()
-            }
+            Ast::Destruc(_) => Err(Error::compiler(concat!(file!(), ":", line!()))),
+            Ast::Property(..) => Err(Error::compiler(concat!(file!(), ":", line!()))),
+            Ast::Lambda(_, _) => self.compile_lambda(func, expr),
             Ast::Assignment(box Assignment {
                 place:
                     Spanned {
